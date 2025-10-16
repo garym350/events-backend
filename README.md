@@ -1,137 +1,90 @@
-# Events Platform (Launchpad Project)
+# FilmHub Online – Backend
 
-## Overview
-The **Events Platform** (FilmHub) is a web application designed for a small community business to create and share events with local members.  
-It allows staff to post events, while community members can view details, register interest, and optionally add events to their personal calendar.
+This is the backend API for FilmHub Online. 
+It provides REST endpoints for creating and retrieving film events and connects to Firebase Firestore. 
+Built with Express.js and TypeScript, deployed on Render.
 
-This project was developed as part of the **Tech Returners Launchpad (Software Engineering Track)**.  
-It demonstrates skills in TypeScript, Express.js, Firestore, and deployment to Render.
+## Live API
 
----
+https://events-backend-0oer.onrender.com
 
-## Features
-- Create and manage community events (staff-only)
-- View all events and individual event details
-- Secure admin-only route for creating new events (protected by passcode)
-- Firestore integration for event storage
-- Hosted REST API on Render
-- Ready for frontend integration (Netlify frontend: FilmHub)
+Example endpoints:
 
----
+```
+GET    /events          → List all events  
+GET    /events/:id      → Get one event  
+POST   /events          → Create new event (admin passcode required)
+```
 
 ## Tech Stack
-- **Backend:** Node.js, Express, TypeScript
-- **Database:** Firestore (Google Firebase)
-- **Hosting:** Render
-- **Validation:** Zod
-- **Environment Variables:** Managed via `.env`
 
----
+- Node.js / Express
+- TypeScript
+- Firebase Firestore
+- CORS / Helmet / Rate limiting
+- Render hosting
 
-## Running Locally
+## Environment Variables
 
-### Prerequisites
-- Node.js 18+
-- Firebase service credentials
+Create a `.env` file in the project root:
 
-### Steps
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/events-backend.git
-   cd events-backend
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Create a `.env` file**
-   Copy the example below into `.env`:
-   ```bash
-   ADMIN_PASSCODE=launchpad2025
-   FIREBASE_PROJECT_ID=your_project_id
-   FIREBASE_PRIVATE_KEY="your_private_key"
-   FIREBASE_CLIENT_EMAIL=your_service_account_email
-   ALLOW_ORIGINS=http://localhost:3000,https://events-platform-frontend.netlify.app
-   ```
-
-4. **Start the server**
-   ```bash
-   npm run dev
-   ```
-
-5. The server will run on:
-   ```
-   http://localhost:10000
-   ```
-
----
-
-## Deployment
-The backend is deployed on **Render** and connected to Firestore.  
-To deploy updates:
 ```bash
-git add .
-git commit -m "Update project"
-git push origin main
-```
-Render automatically rebuilds on push.
-
-Live API: [https://events-platform-backend.onrender.com](https://events-platform-backend.onrender.com)
-
----
-
-## Environment Example (`.env.example`)
-```bash
-ADMIN_PASSCODE=launchpad2025
-FIREBASE_PROJECT_ID=your_project_id
-FIREBASE_PRIVATE_KEY="your_private_key"
-FIREBASE_CLIENT_EMAIL=your_service_account_email
-ALLOW_ORIGINS=http://localhost:3000,https://events-platform-frontend.netlify.app
+PORT=8080
+ADMIN_PASSCODE=launchpad2025!
+ALLOW_ORIGINS=https://filmhubonline.netlify.app
+FIREBASE_PROJECT_ID=<your_project_id>
+FIREBASE_CLIENT_EMAIL=<your_service_account_email>
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n<your_key_here>\n-----END PRIVATE KEY-----\n"
 ```
 
----
+## Development
 
-## Testing
-Basic testing includes verifying:
-- POST `/events` works with correct passcode.
-- GET `/events` returns all events.
-- GET `/events/:id` returns a single event.
-
-Example using curl:
 ```bash
-curl -X POST https://events-platform-backend.onrender.com/events \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Launchpad Demo","description":"Test event","location":"Community Hall","start":"2025-10-10T18:00:00.000Z","end":"2025-10-10T20:00:00.000Z","passcode":"launchpad2025"}'
+npm install
+npm run dev
+```
+Build for production:
+
+```bash
+npm run build
+npm start
 ```
 
-Expected: `201 Created`
+## Example API Requests
 
----
+List events:
 
-## Future Enhancements
-- Add Google Calendar integration.
-- Stripe checkout for paid events.
-- Email confirmations for registrations.
-- User authentication (Firebase Auth).
+```bash
+curl https://events-backend-0oer.onrender.com/events
+```
 
----
+Create an event:
 
-## Project Information
-- **Project:** Events Platform (Launchpad SE Track)
-- **Duration:** 4 weeks (~40 hours)
-- **Hosted:** Render (Backend), Netlify (Frontend)
-- **Created by:** Gary Morris
-- **Date:** October 2025
-
----
+```bash
+curl -X POST https://events-backend-0oer.onrender.com/events   -H "Content-Type: application/json"   -d '{
+        "passcode": "launchpad2025!",
+        "title": "FilmHub Demo Screening",
+        "date": "2025-10-20",
+        "location": "Online",
+        "description": "Example event for Launchpad review."
+      }'
+```
 
 ## Notes for Assessors
-- **Admin Passcode:** Provided privately via Launchpad submission notes (not stored in repo).  
-- The project meets all Launchpad SE MVP and documentation requirements.  
-- Live backend and frontend integrations verified prior to submission.
 
----
+- Frontend: https://filmhubonline.netlify.app  
+- Backend: https://events-backend-0oer.onrender.com  
+- Admin passcode: launchpad2025!  
+- Invoice ID: INV-20251009-001  
+- PO Number: 1842  
+- Submission date: 9 October 2025  
+- Both repositories are public and ready for review.
 
-© 2025 Launchpad Project – Created for Tech Returners / Northcoders Programme.
+## Review Notes
+
+- CORS limited to Netlify frontend origin
+- JSON error handling
+- Environment variables set for Render deployment
+- Logging disabled in production
+
+© 2025 Gary Morris – Project submitted to Northcoders Launchpad
