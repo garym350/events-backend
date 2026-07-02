@@ -2,7 +2,8 @@ import { z } from "zod";
 
 /** Reusable */
 const isoDate = z.string().refine((s) => !Number.isNaN(Date.parse(s)), "Please enter a valid event date and time.");
-const nonEmpty = (min: number) => z.string().trim().min(min);
+const nonEmpty = (label: string, min: number) =>
+  z.string().trim().min(min, { message: `${label} must be at least ${min} characters.` });
 const EVENT_DATE_RANGE_YEARS = 5;
 
 function currentYearUtc(nowMs = Date.now()) {
@@ -11,9 +12,9 @@ function currentYearUtc(nowMs = Date.now()) {
 
 /** Event */
 export const EventSchema = z.object({
-  title: nonEmpty(3),
-  description: nonEmpty(10),
-  location: nonEmpty(2),
+  title: nonEmpty("Event title", 2),
+  description: nonEmpty("Description", 10),
+  location: nonEmpty("Location", 2),
   start: isoDate,
   end: isoDate,
   // We’ll normalize isPaid from priceType, but still allow it to come in:
@@ -101,8 +102,8 @@ export type EventInput = z.infer<typeof EventSchema>;
 
 /** Signup */
 export const SignupSchema = z.object({
-  eventId: nonEmpty(1),
-  name: nonEmpty(2),
+  eventId: nonEmpty("Event ID", 1),
+  name: nonEmpty("Name", 2),
   email: z.string().email(),
   amountPence: z.coerce.number().int().positive().optional(),
 });
