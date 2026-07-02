@@ -1,0 +1,477 @@
+
+== Preflight: backend root ==
+BACKEND_ROOT=/home/gary-morris/Desktop/EVENTS PLATFORM/events-platform/events-backend
+
+== Evidence anchors before patch ==
+src/lib/schemas.ts:4:const isoDate = z.string().refine((s) => !Number.isNaN(Date.parse(s)), "Invalid ISO datetime");
+src/lib/schemas.ts:23:.superRefine((data, ctx) => {
+src/lib/schemas.ts:31:      message: "end must be after start",
+src/routes/events.ts:118:router.post("/", async (req, res) => {
+src/routes/events.ts:151:    return res.status(400).json({ error: e?.message || "Invalid payload" });
+src/routes/events.ts:156:router.put("/:id", async (req, res) => {
+src/routes/events.ts:196:    return res.status(400).json({ error: e?.message || "Failed to update event" });
+
+-- src/lib/schemas.ts lines 1-70 --
+     1	import { z } from "zod";
+     2	
+     3	/** Reusable */
+     4	const isoDate = z.string().refine((s) => !Number.isNaN(Date.parse(s)), "Invalid ISO datetime");
+     5	const nonEmpty = (min: number) => z.string().trim().min(min);
+     6	
+     7	/** Event */
+     8	export const EventSchema = z.object({
+     9	  title: nonEmpty(3),
+    10	  description: nonEmpty(10),
+    11	  location: nonEmpty(2),
+    12	  start: isoDate,
+    13	  end: isoDate,
+    14	  // We’ll normalize isPaid from priceType, but still allow it to come in:
+    15	  isPaid: z.boolean().optional().default(false),
+    16	  priceType: z.enum(["free", "fixed", "pay_what_you_feel"]).default("free"),
+    17	  pricePence: z.coerce.number().int().positive().optional().nullable(), // required if fixed
+    18	  capacity: z.coerce.number().int().positive().optional().nullable(),
+    19	
+    20	  /** New: optional TMDb movie ID */
+    21	  movieId: z.string().trim().optional().nullable(),
+    22	})
+    23	.superRefine((data, ctx) => {
+    24	  // end after start
+    25	  const startMs = Date.parse(data.start);
+    26	  const endMs = Date.parse(data.end);
+    27	  if (!(endMs > startMs)) {
+    28	    ctx.addIssue({
+    29	      path: ["end"],
+    30	      code: z.ZodIssueCode.custom,
+    31	      message: "end must be after start",
+    32	    });
+    33	  }
+    34	
+    35	  // price rules
+    36	  if (data.priceType === "fixed") {
+    37	    if (data.pricePence == null) {
+    38	      ctx.addIssue({
+    39	        path: ["pricePence"],
+    40	        code: z.ZodIssueCode.custom,
+    41	        message: "pricePence is required for fixed price events",
+    42	      });
+    43	    }
+    44	  } else {
+    45	    if (data.priceType === "free" && data.pricePence != null) {
+    46	      ctx.addIssue({
+    47	        path: ["pricePence"],
+    48	        code: z.ZodIssueCode.custom,
+    49	        message: "pricePence must be omitted for free events",
+    50	      });
+    51	    }
+    52	  }
+    53	})
+    54	.transform((data) => {
+    55	  // normalize isPaid from priceType
+    56	  const isPaid = data.priceType !== "free";
+    57	  return { ...data, isPaid };
+    58	});
+    59	
+    60	export type EventInput = z.infer<typeof EventSchema>;
+    61	
+    62	/** Signup */
+    63	export const SignupSchema = z.object({
+    64	  eventId: nonEmpty(1),
+    65	  name: nonEmpty(2),
+    66	  email: z.string().email(),
+    67	  amountPence: z.coerce.number().int().positive().optional(),
+    68	});
+    69	
+    70	export type SignupInput = z.infer<typeof SignupSchema>;
+
+-- src/routes/events.ts lines 45-70 and 145-200 --
+    45	function normalizeEvent(id: string, data: any) {
+    46	  return {
+    47	    id,
+    48	    ...data,
+    49	    start: toIso(data.start),
+    50	    end: toIso(data.end),
+    51	  };
+    52	}
+    53	
+    54	/** Convert ISO string to [yyyy, m, d, hh, mm] for `ics` */
+    55	function isoToDateArray(iso: string | null | undefined) {
+    56	  if (!iso) return undefined;
+    57	  const d = new Date(iso);
+    58	  if (isNaN(d.getTime())) return undefined;
+    59	  return [
+    60	    d.getUTCFullYear(),
+    61	    d.getUTCMonth() + 1,
+    62	    d.getUTCDate(),
+    63	    d.getUTCHours(),
+    64	    d.getUTCMinutes(),
+    65	  ] as [number, number, number, number, number];
+    66	}
+    67	
+    68	/* =========================
+    69	   Routes
+    70	   ========================= */
+   145	    };
+   146	
+   147	    const docRef = await db.collection("events").add(data);
+   148	    const saved = await docRef.get();
+   149	    return res.status(201).json(normalizeEvent(saved.id, saved.data()));
+   150	  } catch (e: any) {
+   151	    return res.status(400).json({ error: e?.message || "Invalid payload" });
+   152	  }
+   153	});
+   154	
+   155	// UPDATE event (protected by admin passcode)
+   156	router.put("/:id", async (req, res) => {
+   157	  try {
+   158	    const raw = req.headers["x-admin-passcode"];
+   159	    const got =
+   160	      typeof raw === "string" ? raw.trim() : Array.isArray(raw) ? raw[0]?.trim() : "";
+   161	
+   162	    if (!got) {
+   163	      return res
+   164	        .status(403)
+   165	        .json({ error: "Forbidden: missing x-admin-passcode header" });
+   166	    }
+   167	    if (!ADMIN_PASS) {
+   168	      return res
+   169	        .status(403)
+   170	        .json({ error: "Forbidden: server ADMIN_PASSCODE not configured" });
+   171	    }
+   172	    if (got !== ADMIN_PASS) {
+   173	      return res.status(403).json({ error: "Forbidden: invalid passcode" });
+   174	    }
+   175	
+   176	    const { id } = req.params;
+   177	    const ref = db.collection("events").doc(id);
+   178	    const snap = await ref.get();
+   179	
+   180	    if (!snap.exists) {
+   181	      return res.status(404).json({ error: "Event not found" });
+   182	    }
+   183	
+   184	    const parsed = EventSchema.parse(req.body);
+   185	    await ref.update({
+   186	      ...parsed,
+   187	      start: Timestamp.fromDate(new Date(parsed.start)),
+   188	      end: Timestamp.fromDate(new Date(parsed.end)),
+   189	      updatedAt: Timestamp.now(),
+   190	    });
+   191	
+   192	    const saved = await ref.get();
+   193	    return res.json(normalizeEvent(saved.id, saved.data()));
+   194	  } catch (e: any) {
+   195	    console.error("[events] UPDATE error:", e);
+   196	    return res.status(400).json({ error: e?.message || "Failed to update event" });
+   197	  }
+   198	});
+   199	
+   200	// DELETE event (protected by admin passcode)
+
+== Guard checks before patch ==
+Backups written to: backups/events_stage3_backend_date_validation_20260702_164638
+
+== Applying guarded backend date-validation patch ==
+
+== Evidence anchors after patch ==
+src/lib/schemas.ts:6:const EVENT_DATE_RANGE_YEARS = 5;
+src/lib/schemas.ts:38:    const maxYear = minYear + EVENT_DATE_RANGE_YEARS;
+src/lib/schemas.ts:46:        message: "The event end time must be after the start time.",
+src/lib/schemas.ts:54:        message: "Events cannot be created in the past. Please choose a future start date.",
+src/lib/schemas.ts:62:        message: `Event dates must be within the current year and the next ${EVENT_DATE_RANGE_YEARS} years.`,
+src/lib/schemas.ts:70:        message: `Event dates must be within the current year and the next ${EVENT_DATE_RANGE_YEARS} years.`,
+src/routes/events.ts:54:function formatRequestError(e: any, fallback: string): string {
+src/routes/events.ts:159:    return res.status(400).json({ error: formatRequestError(e, "Invalid event details") });
+src/routes/events.ts:204:    return res.status(400).json({ error: formatRequestError(e, "Failed to update event") });
+tests/event-date-validation.spec.ts:23:describe("EventSchema backend date validation", () => {
+tests/event-date-validation.spec.ts:34:    expect(issueMessages(result)).toContain("The event end time must be after the start time.");
+tests/event-date-validation.spec.ts:43:    expect(issueMessages(result)).toContain("Events cannot be created in the past. Please choose a future start date.");
+
+-- src/lib/schemas.ts lines 1-90 --
+     1	import { z } from "zod";
+     2	
+     3	/** Reusable */
+     4	const isoDate = z.string().refine((s) => !Number.isNaN(Date.parse(s)), "Please enter a valid event date and time.");
+     5	const nonEmpty = (min: number) => z.string().trim().min(min);
+     6	const EVENT_DATE_RANGE_YEARS = 5;
+     7	
+     8	function currentYearUtc(nowMs = Date.now()) {
+     9	  return new Date(nowMs).getUTCFullYear();
+    10	}
+    11	
+    12	/** Event */
+    13	export const EventSchema = z.object({
+    14	  title: nonEmpty(3),
+    15	  description: nonEmpty(10),
+    16	  location: nonEmpty(2),
+    17	  start: isoDate,
+    18	  end: isoDate,
+    19	  // We’ll normalize isPaid from priceType, but still allow it to come in:
+    20	  isPaid: z.boolean().optional().default(false),
+    21	  priceType: z.enum(["free", "fixed", "pay_what_you_feel"]).default("free"),
+    22	  pricePence: z.coerce.number().int().positive().optional().nullable(), // required if fixed
+    23	  capacity: z.coerce.number().int().positive().optional().nullable(),
+    24	
+    25	  /** New: optional TMDb movie ID */
+    26	  movieId: z.string().trim().optional().nullable(),
+    27	})
+    28	.superRefine((data, ctx) => {
+    29	  // friendly backend date validation
+    30	  const startDate = new Date(data.start);
+    31	  const endDate = new Date(data.end);
+    32	  const startMs = startDate.getTime();
+    33	  const endMs = endDate.getTime();
+    34	
+    35	  if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
+    36	    const nowMs = Date.now();
+    37	    const minYear = currentYearUtc(nowMs);
+    38	    const maxYear = minYear + EVENT_DATE_RANGE_YEARS;
+    39	    const startYear = startDate.getUTCFullYear();
+    40	    const endYear = endDate.getUTCFullYear();
+    41	
+    42	    if (!(endMs > startMs)) {
+    43	      ctx.addIssue({
+    44	        path: ["end"],
+    45	        code: z.ZodIssueCode.custom,
+    46	        message: "The event end time must be after the start time.",
+    47	      });
+    48	    }
+    49	
+    50	    if (startMs < nowMs) {
+    51	      ctx.addIssue({
+    52	        path: ["start"],
+    53	        code: z.ZodIssueCode.custom,
+    54	        message: "Events cannot be created in the past. Please choose a future start date.",
+    55	      });
+    56	    }
+    57	
+    58	    if (startYear < minYear || startYear > maxYear) {
+    59	      ctx.addIssue({
+    60	        path: ["start"],
+    61	        code: z.ZodIssueCode.custom,
+    62	        message: `Event dates must be within the current year and the next ${EVENT_DATE_RANGE_YEARS} years.`,
+    63	      });
+    64	    }
+    65	
+    66	    if (endYear < minYear || endYear > maxYear) {
+    67	      ctx.addIssue({
+    68	        path: ["end"],
+    69	        code: z.ZodIssueCode.custom,
+    70	        message: `Event dates must be within the current year and the next ${EVENT_DATE_RANGE_YEARS} years.`,
+    71	      });
+    72	    }
+    73	  }
+    74	
+    75	  // price rules
+    76	  if (data.priceType === "fixed") {
+    77	    if (data.pricePence == null) {
+    78	      ctx.addIssue({
+    79	        path: ["pricePence"],
+    80	        code: z.ZodIssueCode.custom,
+    81	        message: "pricePence is required for fixed price events",
+    82	      });
+    83	    }
+    84	  } else {
+    85	    if (data.priceType === "free" && data.pricePence != null) {
+    86	      ctx.addIssue({
+    87	        path: ["pricePence"],
+    88	        code: z.ZodIssueCode.custom,
+    89	        message: "pricePence must be omitted for free events",
+    90	      });
+
+-- src/routes/events.ts lines 45-80 and 145-200 --
+    45	function normalizeEvent(id: string, data: any) {
+    46	  return {
+    47	    id,
+    48	    ...data,
+    49	    start: toIso(data.start),
+    50	    end: toIso(data.end),
+    51	  };
+    52	}
+    53	
+    54	function formatRequestError(e: any, fallback: string): string {
+    55	  const issues = Array.isArray(e?.issues) ? e.issues : [];
+    56	  const firstMessage = issues.find((issue: any) => typeof issue?.message === "string")?.message;
+    57	  if (firstMessage) return firstMessage;
+    58	  if (typeof e?.message === "string" && e.message.trim()) return e.message;
+    59	  return fallback;
+    60	}
+    61	
+    62	/** Convert ISO string to [yyyy, m, d, hh, mm] for `ics` */
+    63	function isoToDateArray(iso: string | null | undefined) {
+    64	  if (!iso) return undefined;
+    65	  const d = new Date(iso);
+    66	  if (isNaN(d.getTime())) return undefined;
+    67	  return [
+    68	    d.getUTCFullYear(),
+    69	    d.getUTCMonth() + 1,
+    70	    d.getUTCDate(),
+    71	    d.getUTCHours(),
+    72	    d.getUTCMinutes(),
+    73	  ] as [number, number, number, number, number];
+    74	}
+    75	
+    76	/* =========================
+    77	   Routes
+    78	   ========================= */
+    79	
+    80	// GET all events
+   145	
+   146	    const parsed = EventSchema.parse(req.body);
+   147	
+   148	    const data = {
+   149	      ...parsed,
+   150	      start: Timestamp.fromDate(new Date(parsed.start)),
+   151	      end: Timestamp.fromDate(new Date(parsed.end)),
+   152	      createdAt: Timestamp.now(),
+   153	    };
+   154	
+   155	    const docRef = await db.collection("events").add(data);
+   156	    const saved = await docRef.get();
+   157	    return res.status(201).json(normalizeEvent(saved.id, saved.data()));
+   158	  } catch (e: any) {
+   159	    return res.status(400).json({ error: formatRequestError(e, "Invalid event details") });
+   160	  }
+   161	});
+   162	
+   163	// UPDATE event (protected by admin passcode)
+   164	router.put("/:id", async (req, res) => {
+   165	  try {
+   166	    const raw = req.headers["x-admin-passcode"];
+   167	    const got =
+   168	      typeof raw === "string" ? raw.trim() : Array.isArray(raw) ? raw[0]?.trim() : "";
+   169	
+   170	    if (!got) {
+   171	      return res
+   172	        .status(403)
+   173	        .json({ error: "Forbidden: missing x-admin-passcode header" });
+   174	    }
+   175	    if (!ADMIN_PASS) {
+   176	      return res
+   177	        .status(403)
+   178	        .json({ error: "Forbidden: server ADMIN_PASSCODE not configured" });
+   179	    }
+   180	    if (got !== ADMIN_PASS) {
+   181	      return res.status(403).json({ error: "Forbidden: invalid passcode" });
+   182	    }
+   183	
+   184	    const { id } = req.params;
+   185	    const ref = db.collection("events").doc(id);
+   186	    const snap = await ref.get();
+   187	
+   188	    if (!snap.exists) {
+   189	      return res.status(404).json({ error: "Event not found" });
+   190	    }
+   191	
+   192	    const parsed = EventSchema.parse(req.body);
+   193	    await ref.update({
+   194	      ...parsed,
+   195	      start: Timestamp.fromDate(new Date(parsed.start)),
+   196	      end: Timestamp.fromDate(new Date(parsed.end)),
+   197	      updatedAt: Timestamp.now(),
+   198	    });
+   199	
+   200	    const saved = await ref.get();
+
+-- tests/event-date-validation.spec.ts lines 1-140 --
+     1	import { describe, expect, it } from "vitest";
+     2	import { EventSchema } from "../src/lib/schemas.js";
+     3	
+     4	function validEvent(overrides: Record<string, unknown> = {}) {
+     5	  const start = new Date(Date.now() + 24 * 60 * 60 * 1000);
+     6	  const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+     7	
+     8	  return {
+     9	    title: "Future Film Night",
+    10	    description: "A valid future event description.",
+    11	    location: "Main Screen",
+    12	    start: start.toISOString(),
+    13	    end: end.toISOString(),
+    14	    priceType: "free",
+    15	    ...overrides,
+    16	  };
+    17	}
+    18	
+    19	function issueMessages(result: ReturnType<typeof EventSchema.safeParse>) {
+    20	  return result.success ? [] : result.error.issues.map((issue) => issue.message);
+    21	}
+    22	
+    23	describe("EventSchema backend date validation", () => {
+    24	  it("accepts a valid future event inside the supported date range", () => {
+    25	    const result = EventSchema.safeParse(validEvent());
+    26	    expect(result.success).toBe(true);
+    27	  });
+    28	
+    29	  it("rejects an event whose end time is not after its start time", () => {
+    30	    const start = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    31	    const result = EventSchema.safeParse(validEvent({ start, end: start }));
+    32	
+    33	    expect(result.success).toBe(false);
+    34	    expect(issueMessages(result)).toContain("The event end time must be after the start time.");
+    35	  });
+    36	
+    37	  it("rejects an event that starts in the past", () => {
+    38	    const start = new Date(Date.now() - 60 * 60 * 1000);
+    39	    const end = new Date(Date.now() + 60 * 60 * 1000);
+    40	    const result = EventSchema.safeParse(validEvent({ start: start.toISOString(), end: end.toISOString() }));
+    41	
+    42	    expect(result.success).toBe(false);
+    43	    expect(issueMessages(result)).toContain("Events cannot be created in the past. Please choose a future start date.");
+    44	  });
+    45	
+    46	  it("rejects event dates more than five years ahead", () => {
+    47	    const tooFar = new Date(Date.now());
+    48	    tooFar.setUTCFullYear(tooFar.getUTCFullYear() + 6);
+    49	    const tooFarEnd = new Date(tooFar.getTime() + 2 * 60 * 60 * 1000);
+    50	    const result = EventSchema.safeParse(validEvent({ start: tooFar.toISOString(), end: tooFarEnd.toISOString() }));
+    51	
+    52	    expect(result.success).toBe(false);
+    53	    expect(issueMessages(result)).toContain("Event dates must be within the current year and the next 5 years.");
+    54	  });
+    55	});
+
+== Banned-pattern checks ==
+OK: banned old validation/error patterns are absent
+
+== Regression lock checks ==
+126:router.post("/", async (req, res) => {
+128:    const raw = req.headers["x-admin-passcode"];
+135:        .json({ error: "Forbidden: missing x-admin-passcode header" });
+150:      start: Timestamp.fromDate(new Date(parsed.start)),
+151:      end: Timestamp.fromDate(new Date(parsed.end)),
+152:      createdAt: Timestamp.now(),
+155:    const docRef = await db.collection("events").add(data);
+164:router.put("/:id", async (req, res) => {
+166:    const raw = req.headers["x-admin-passcode"];
+173:        .json({ error: "Forbidden: missing x-admin-passcode header" });
+193:    await ref.update({
+195:      start: Timestamp.fromDate(new Date(parsed.start)),
+196:      end: Timestamp.fromDate(new Date(parsed.end)),
+197:      updatedAt: Timestamp.now(),
+211:    const raw = req.headers["x-admin-passcode"];
+218:        .json({ error: "Forbidden: missing x-admin-passcode header" });
+Invariant checklist:
+- POST /events route name unchanged
+- PUT /events/:id route name unchanged
+- x-admin-passcode header semantics unchanged
+- Firestore collection path remains events
+- createdAt/updateAt timestamp write paths remain present
+- start/end are still persisted as Firestore Timestamp values
+- No frontend files patched by this script
+
+== Validation ==
+
+> events-backend@1.0.0 typecheck
+> tsc --noEmit
+
+
+> events-backend@1.0.0 build
+> tsc
+
+OK: backend date validation regression checks passed
+
+== Changed-file list ==
+/home/gary-morris/Desktop/EVENTS PLATFORM/events-platform/events-backend/src/lib/schemas.ts
+/home/gary-morris/Desktop/EVENTS PLATFORM/events-platform/events-backend/src/routes/events.ts
+/home/gary-morris/Desktop/EVENTS PLATFORM/events-platform/events-backend/tests/event-date-validation.spec.ts
+
+OK: events_stage3_backend_date_validation_safe_patch completed successfully.

@@ -1,13 +1,22 @@
 // src/routes/events.ts
 import { Router } from "express";
 import { db } from "../lib/firebaseAdmin.js";
-import { requireAdmin } from "../lib/adminAuth.js";
 import { EventSchema } from "../lib/schemas.js";
 import { Timestamp } from "firebase-admin/firestore";
 import ics from "ics";
 const { createEvent: createIcsEvent } = ics;
 
 const router = Router();
+
+/* =========================
+   Startup checks
+   ========================= */
+const ADMIN_PASS = (process.env.ADMIN_PASSCODE ?? "").trim();
+if (!ADMIN_PASS) {
+  console.warn(
+    "[events] ADMIN_PASSCODE is empty. POST/DELETE /events will always return 403 until set."
+  );
+}
 
 /* =========================
    Helpers
@@ -40,14 +49,6 @@ function normalizeEvent(id: string, data: any) {
     start: toIso(data.start),
     end: toIso(data.end),
   };
-}
-
-function formatRequestError(e: any, fallback: string): string {
-  const issues = Array.isArray(e?.issues) ? e.issues : [];
-  const firstMessage = issues.find((issue: any) => typeof issue?.message === "string")?.message;
-  if (firstMessage) return firstMessage;
-  if (typeof e?.message === "string" && e.message.trim()) return e.message;
-  return fallback;
 }
 
 /** Convert ISO string to [yyyy, m, d, hh, mm] for `ics` */
@@ -113,9 +114,27 @@ router.get("/:id/ics", async (req, res) => {
   return res.send(value);
 });
 
-// CREATE event (protected by admin session token)
-router.post("/", requireAdmin, async (req, res) => {
+// CREATE event (protected by admin passcode)
+router.post("/", async (req, res) => {
   try {
+    const raw = req.headers["x-admin-passcode"];
+    const got =
+      typeof raw === "string" ? raw.trim() : Array.isArray(raw) ? raw[0]?.trim() : "";
+
+    if (!got) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: missing x-admin-passcode header" });
+    }
+    if (!ADMIN_PASS) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: server ADMIN_PASSCODE not configured" });
+    }
+    if (got !== ADMIN_PASS) {
+      return res.status(403).json({ error: "Forbidden: invalid passcode" });
+    }
+
     const parsed = EventSchema.parse(req.body);
 
     const data = {
@@ -129,13 +148,31 @@ router.post("/", requireAdmin, async (req, res) => {
     const saved = await docRef.get();
     return res.status(201).json(normalizeEvent(saved.id, saved.data()));
   } catch (e: any) {
-    return res.status(400).json({ error: formatRequestError(e, "Invalid event details") });
+    return res.status(400).json({ error: e?.message || "Invalid payload" });
   }
 });
 
-// UPDATE event (protected by admin session token)
-router.put("/:id", requireAdmin, async (req, res) => {
+// UPDATE event (protected by admin passcode)
+router.put("/:id", async (req, res) => {
   try {
+    const raw = req.headers["x-admin-passcode"];
+    const got =
+      typeof raw === "string" ? raw.trim() : Array.isArray(raw) ? raw[0]?.trim() : "";
+
+    if (!got) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: missing x-admin-passcode header" });
+    }
+    if (!ADMIN_PASS) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: server ADMIN_PASSCODE not configured" });
+    }
+    if (got !== ADMIN_PASS) {
+      return res.status(403).json({ error: "Forbidden: invalid passcode" });
+    }
+
     const { id } = req.params;
     const ref = db.collection("events").doc(id);
     const snap = await ref.get();
@@ -156,13 +193,31 @@ router.put("/:id", requireAdmin, async (req, res) => {
     return res.json(normalizeEvent(saved.id, saved.data()));
   } catch (e: any) {
     console.error("[events] UPDATE error:", e);
-    return res.status(400).json({ error: formatRequestError(e, "Failed to update event") });
+    return res.status(400).json({ error: e?.message || "Failed to update event" });
   }
 });
 
-// DELETE event (protected by admin session token)
-router.delete("/:id", requireAdmin, async (req, res) => {
+// DELETE event (protected by admin passcode)
+router.delete("/:id", async (req, res) => {
   try {
+    const raw = req.headers["x-admin-passcode"];
+    const got =
+      typeof raw === "string" ? raw.trim() : Array.isArray(raw) ? raw[0]?.trim() : "";
+
+    if (!got) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: missing x-admin-passcode header" });
+    }
+    if (!ADMIN_PASS) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: server ADMIN_PASSCODE not configured" });
+    }
+    if (got !== ADMIN_PASS) {
+      return res.status(403).json({ error: "Forbidden: invalid passcode" });
+    }
+
     const { id } = req.params;
     const ref = db.collection("events").doc(id);
     const snap = await ref.get();

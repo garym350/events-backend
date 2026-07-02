@@ -5,6 +5,7 @@ import "dotenv/config";
 import express from "express";
 import cors, { type CorsOptions } from "cors";
 
+import admin from "./routes/admin.js";
 import events from "./routes/events.js";
 import signups from "./routes/signups.js";
 import checkout from "./routes/checkout.js"; // optional: Stripe
@@ -65,7 +66,7 @@ const corsOptions: CorsOptions = {
     return callback(null, false);
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-admin-passcode"],
+  allowedHeaders: ["Content-Type", "Authorization"],
   optionsSuccessStatus: 200,
 };
 
@@ -84,6 +85,7 @@ app.get("/health", (_req, res) =>
   })
 );
 
+app.use("/admin", admin);
 app.use("/events", events);
 app.use("/signups", signups);
 app.use("/checkout", checkout);
