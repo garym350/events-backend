@@ -24,6 +24,18 @@ function useBearer() {
   return KEY.length > 20 && KEY.startsWith("eyJ");
 }
 
+function redactUrl(value: string) {
+  try {
+    const parsed = new URL(value);
+    for (const key of ["api_key", "access_token", "token"]) {
+      if (parsed.searchParams.has(key)) parsed.searchParams.set(key, "[REDACTED]");
+    }
+    return parsed.toString();
+  } catch {
+    return value.replace(/([?&](?:api_key|access_token|token)=)[^&\s]+/gi, "$1[REDACTED]");
+  }
+}
+
 /* =========================
    HTTP helper
    ========================= */
@@ -44,7 +56,8 @@ async function fetchWithDebug(url: string, opts: RequestInit = {}) {
     }
   }
 
-  console.log("[TMDB] Fetching:", finalUrl);
+  const safeUrl = redactUrl(finalUrl);
+  console.log("[TMDB] Fetching:", safeUrl);
   if (headers.Authorization) {
     console.log("[TMDB] Headers:", { Authorization: "Bearer ******" });
   } else {
@@ -61,7 +74,7 @@ async function fetchWithDebug(url: string, opts: RequestInit = {}) {
         body = await res.text();
       }
       console.error("[TMDB] Request failed", {
-        url: finalUrl,
+        url: safeUrl,
         status: res.status,
         statusText: res.statusText,
         body,

@@ -11,15 +11,17 @@ import signups from "./routes/signups.js";
 import checkout from "./routes/checkout.js"; // optional: Stripe
 import tmdb from "./routes/tmdb.js";
 
-// Surface crashes clearly during dev
-process.on("uncaughtException", (err) => {
-  console.error("[uncaughtException]", err);
-  process.exit(1);
-});
-process.on("unhandledRejection", (reason) => {
-  console.error("[unhandledRejection]", reason);
-  process.exit(1);
-});
+// Surface crashes clearly during dev without hijacking the test runner.
+if (process.env.NODE_ENV !== "test") {
+  process.on("uncaughtException", (err) => {
+    console.error("[uncaughtException]", err);
+    process.exit(1);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error("[unhandledRejection]", reason);
+    process.exit(1);
+  });
+}
 
 const app = express();
 app.use(express.json());

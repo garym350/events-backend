@@ -1,11 +1,24 @@
 // tests/api.spec.ts
 import request from "supertest";
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import app from "../src/index.js";
 import { db } from "../src/lib/firebaseAdmin.js";
+import { createAdminSessionToken, hashAdminPasscode } from "../src/lib/adminAuth.js";
 
 let createdEventId: string | null = null;
 let createdSignupId: string | null = null;
+let adminToken = "";
+
+function futureIso(offsetMs: number) {
+  return new Date(Date.now() + offsetMs).toISOString();
+}
+
+beforeAll(() => {
+  process.env.ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || "test-admin-session-secret";
+  process.env.ADMIN_PASSCODE_HASH =
+    process.env.ADMIN_PASSCODE_HASH || hashAdminPasscode("test-admin-passcode");
+  adminToken = createAdminSessionToken().token;
+});
 
 describe("API", () => {
   //
@@ -14,7 +27,7 @@ describe("API", () => {
   it("GET /health should return ok", async () => {
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true });
+    expect(res.body).toHaveProperty("ok", true);
   });
 
   //
@@ -26,36 +39,36 @@ describe("API", () => {
     expect(Array.isArray(res.body)).toBe(true);
   });
 
-  it("POST /events without admin passcode should fail", async () => {
+  it("POST /events without admin token should fail", async () => {
     const res = await request(app).post("/events").send({
       title: "Test Event",
       description: "A test event description",
-      start: new Date().toISOString(),
-      end: new Date(Date.now() + 3600 * 1000).toISOString(),
+      start: futureIso(3600 * 1000),
+      end: futureIso(2 * 3600 * 1000),
       location: "Testville",
     });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
-  it("POST /events with wrong admin passcode should 403", async () => {
+  it("POST /events with wrong admin token should 401", async () => {
     const res = await request(app)
       .post("/events")
-      .set("x-admin-passcode", "wrong-pass")
+      .set("Authorization", "Bearer wrong-token")
       .send({
         title: "Bad Event",
         description: "desc desc desc",
-        start: new Date().toISOString(),
-        end: new Date(Date.now() + 3600 * 1000).toISOString(),
+        start: futureIso(3600 * 1000),
+        end: futureIso(2 * 3600 * 1000),
         location: "Nowhere",
         priceType: "free",
       });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
   it("POST /events with invalid end date should fail", async () => {
     const res = await request(app)
       .post("/events")
-      .set("x-admin-passcode", process.env.ADMIN_PASSCODE || "lanchpad2025!")
+      .set("Authorization", `Bearer ${adminToken}`)
       .send({
         title: "Invalid Event",
         description: "desc desc desc",
@@ -70,27 +83,27 @@ describe("API", () => {
   it("POST /events with fixed price but no pricePence should fail", async () => {
     const res = await request(app)
       .post("/events")
-      .set("x-admin-passcode", process.env.ADMIN_PASSCODE || "lanchpad2025!")
+      .set("Authorization", `Bearer ${adminToken}`)
       .send({
         title: "Fixed Price Event",
         description: "desc desc desc",
-        start: new Date().toISOString(),
-        end: new Date(Date.now() + 3600 * 1000).toISOString(),
+        start: futureIso(3600 * 1000),
+        end: futureIso(2 * 3600 * 1000),
         location: "Testville",
         priceType: "fixed",
       });
     expect(res.status).toBe(400);
   });
 
-  it("POST /events with admin passcode should succeed", async () => {
+  it("POST /events with admin token should succeed", async () => {
     const res = await request(app)
       .post("/events")
-      .set("x-admin-passcode", process.env.ADMIN_PASSCODE || "lanchpad2025!")
+      .set("Authorization", `Bearer ${adminToken}`)
       .send({
         title: "Integration Test Event",
         description: "Integration test event description",
-        start: new Date().toISOString(),
-        end: new Date(Date.now() + 3600 * 1000).toISOString(),
+        start: futureIso(3600 * 1000),
+        end: futureIso(2 * 3600 * 1000),
         location: "Testville",
         priceType: "free",
         capacity: 100,
